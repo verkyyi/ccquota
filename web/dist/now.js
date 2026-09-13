@@ -269,9 +269,12 @@ function renderLive(snap, app) {
         el('h2', {}, 'Right now'),
         el('span', { class: 'note', id: 'live-note' }, '')),
       el('div', { class: 'tiles' },
+        // No "$ / hour": the live tiles describe subscription work, whose
+        // per-hour dollar figure was an API-equivalent estimate of money nobody
+        // is charged. Tokens per minute answers the same question ("how fast is
+        // this burning") in the unit that is actually being consumed.
         C.tile('lv-sessions', 'active / recent sessions'),
         C.tile('lv-tpm', 'tokens / min'),
-        C.tile('lv-uph', '$ / hour (notional)'),
         C.tile('lv-stok', 'tokens in flight')),
       el('div', { class: 'live-rows', id: 'live-rows' })));
   }
@@ -285,8 +288,6 @@ function renderLive(snap, app) {
   if (!snap) return;
   C.tween($('#lv-sessions', liveWrapEl), snap.active_sessions, (v) => String(Math.round(v)));
   C.tween($('#lv-tpm', liveWrapEl), snap.tokens_per_min, (v) => fmtInt(Math.round(v)));
-  if (snap.active_sessions > 0 && snap.unpriced_sessions === snap.active_sessions) $('#lv-uph',liveWrapEl).textContent = '—';
-  else C.tween($('#lv-uph', liveWrapEl), snap.usd_per_hour, (v) => (snap.unpriced_sessions ? '≥ $' : '$') + v.toFixed(2));
   C.tween($('#lv-stok', liveWrapEl), snap.session_tokens || 0, (v) => fmtInt(Math.round(v)));
 
   const chips = app.state.chips || {};
