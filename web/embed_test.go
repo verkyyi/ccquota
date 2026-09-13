@@ -31,9 +31,26 @@ func TestAssets_DashboardIsEmbedded(t *testing.T) {
 	// this test — an anchor whose job is "the shell is not truncated" should not
 	// also be an assertion about branding, or every rename is a red build.
 	// `<title>` alone still proves the head survived.
-	for _, want := range []string{"<title>", `href="styles.css"`, `src="app.js"`} {
+	//
+	// The section ids are anchored for the same reason and with the same
+	// constraint: they are STRUCTURAL, not headings. `id="consumption"` is
+	// where the page mounts that section, and rewording its <h2> must not turn
+	// this test red -- which is exactly what anchoring on "Consumption" would
+	// do. Together they prove the single-surface shell survived: one <main>
+	// with the sections every renderer mounts into.
+	for _, want := range []string{
+		"<title>", `href="styles.css"`, `src="app.js"`,
+		`id="page"`, `id="spend"`, `id="status"`, `id="consumption"`, `id="analysis"`,
+	} {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("index.html shell is missing %q", want)
+		}
+	}
+	// The retired view tabs must not come back by accident: the page is one
+	// continuous surface, and a stray tab would be navigation to nowhere.
+	for _, gone := range []string{`id="tab-now"`, `id="tab-review"`} {
+		if strings.Contains(string(b), gone) {
+			t.Errorf("index.html still has %q -- the Now/Review split is retired", gone)
 		}
 	}
 	// Every module the shell depends on must actually be embedded, and none
