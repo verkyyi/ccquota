@@ -76,6 +76,7 @@ a { color: var(--s1); }
    the fleet is working, and the wheels roll to follow the projection. */
 /* The lifetime token counter is a badge. Every metric inside it is in em, so
    the one font-size below sets the whole thing -- it used to reach 40px. */
+#pulse:empty { display: none; }
 .hero { padding: 0 0 14px; font-size: 15px; }
 .hero .tm {
   display: inline-flex; align-items: center; gap: .4em; flex-wrap: nowrap;
@@ -442,3 +443,29 @@ details.unpriced-reasons table { display: block; overflow-x: auto; max-width: 10
 /* The folded tail: present and countable, but visibly not one of the rows that
    carry a number worth reading. */
 .folded td { color: var(--ink-3); font-style: italic; }
+/* ── the operations tier ───────────────────────────────────────────────────
+   Folded by default. Not hidden: everything it holds still answers a real
+   question, and the page is still one continuous surface -- the fold only says
+   that "what did we pay" is asked more often than "which machine is near its
+   5-hour limit". */
+#alerts:empty { display: none; }
+
+.ops { margin-top: 26px; border-top: 1px solid var(--line); padding-top: 4px; }
+.ops > summary {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  padding: 12px 2px; cursor: pointer; list-style: none; user-select: none;
+  color: var(--ink-2);
+}
+.ops > summary::-webkit-details-marker { display: none; }
+/* The marker is drawn, not inherited, so it can rotate and so its colour comes
+   from the same tokens as the text beside it. */
+.ops > summary::before {
+  content: "▸"; display: inline-block; color: var(--ink-3);
+  transition: transform .15s ease; font-size: 13px; line-height: 1;
+}
+.ops[open] > summary::before { transform: rotate(90deg); }
+.ops > summary:hover { color: var(--ink); }
+.ops > summary:focus-visible { outline: 2px solid var(--s1); outline-offset: 2px; border-radius: 4px; }
+.ops-title { font-weight: 600; font-size: 14px; letter-spacing: .02em; }
+.ops-note { color: var(--ink-3); font-size: 12.5px; }
+@media (prefers-reduced-motion: reduce) { .ops > summary::before { transition: none; } }
