@@ -24,6 +24,7 @@
 // back into whichever handlers were passed at update() time.
 import { DIMS } from './lib/state.js';
 import { shortProject } from './lib/format.js';
+import { accountGroups, SOURCE_LABEL } from './lib/providers.js';
 import { el, $ } from './lib/dom.js';
 // `app` is read only inside functions below (never at module-eval time), so
 // this is a safe circular import: app.js imports renderNav/renderScopeControls/
@@ -129,10 +130,16 @@ export function createScopeControls({ span = true } = {}) {
     handlers = cb || {};
 
     const relevant = accounts.filter((a) => !state.chips.source || (a.source || 'claude') === state.chips.source);
-    const opts = relevant.map((a) => el('option', { value: a.account_uuid },
-      `${a.source === 'codex' ? 'Codex · ' : 'Claude · '}${a.email || a.display_name || a.account_uuid}`));
-    opts.unshift(el('option', { value: 'all' }, `All ${relevant.length} accounts / usage pools`));
-    sel.replaceChildren(...opts);
+    // Grouped, not prefixed. The old `Claude · ` / `Codex · ` prefix asserted
+    // a two-source world and, worse, said "account" meant one thing when it
+    // means two: a subscription somebody pays for monthly, or one calling
+    // application on the gateway. The optgroup heading carries that now.
+    const groups = accountGroups(relevant).map((g) =>
+      el('optgroup', { label: g.label },
+        ...g.options.map((o) => el('option', { value: o.value }, o.text))));
+    sel.replaceChildren(
+      el('option', { value: 'all' }, `All ${relevant.length} accounts / usage pools`),
+      ...groups);
     sel.style.display = relevant.length ? '' : 'none';
     sel.value = state.sub;
 
@@ -141,7 +148,7 @@ export function createScopeControls({ span = true } = {}) {
       if (state.chips.source && !sources.includes(state.chips.source)) sources.push(state.chips.source);
       sourceSel.replaceChildren(el('option', { value: '' }, 'All sources'),
         ...sources.map((source) => el('option', { value: source },
-          ({ claude: 'Claude Code', codex: 'Codex' })[source] || source)));
+          SOURCE_LABEL[source] || source)));
       sourceSel.value = state.chips.source || '';
     }
 

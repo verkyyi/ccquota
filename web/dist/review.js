@@ -217,7 +217,10 @@ function kpisCard(result) {
   // and it looks exactly as plausible as a correct one.
   const provenance = {};
   (d.pricing || []).forEach((pr) => { provenance[pr.source] = pr; });
-  const sourceTiles = (activeSources(d).length ? activeSources(d) : ['claude']).map((src) => {
+  // No fallback to ['claude']. An empty scope is an empty scope; inventing a
+  // Claude column for it is how this page came to read as Claude-first in the
+  // first place.
+  const sourceTiles = activeSources(d).map((src) => {
     const c = costOf(d, src), pc = costOf(p, src);
     const tile = C.kpiTile({
       id: 'kpi-spend-' + src,
@@ -293,6 +296,11 @@ function kpisCard(result) {
     el('summary', {}, `Why ${fmtFull(coverage.unpriced)} requests have no price · 未计价原因`),
     el('table', {}, el('thead', {}, el('tr', {}, el('th', {}, 'Source / model'), el('th', {}, 'Reason'), el('th', {}, 'Requests'))),
       el('tbody', {}, d.unpriced_reasons.map((r) => el('tr', {}, el('td', {}, `${r.source} / ${r.model || 'unknown'}`), el('td', {}, r.reason), el('td', {}, fmtFull(r.events))))))));
+  // With the Claude fallback gone, a scope that ran nothing has no spend tile
+  // at all. Say so, rather than leaving a KPI row of zeroes that looks like a
+  // measurement.
+  if (!sourceTiles.length) card.appendChild(el('p', { class: 'hint' },
+    'No usage in this selection, so there is no spend to attribute to a source.'));
   if (d.cache_write_known_events > 0) card.appendChild(el('p', {class:'hint'}, `Codex cache writes: ${fmtInt(d.cache_write_tokens)} tokens · breakdown available for ${fmtInt(d.cache_write_known_events)} requests. Included in input totals.`));
   card.appendChild(el('div', { class: 'kpis' },
     C.kpiTile({ id: 'kpi-tokens', label: 'tokens', value: fmtInt(d.tokens), delta: delta(d.tokens, p.tokens), tone: TONE_MORE_IS_WORSE }),
