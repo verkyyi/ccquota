@@ -2,9 +2,9 @@
 // widget (subscription select · span segmented control · chips row).
 //
 // As of the Task 15 nav restructure, these are two SEPARATE things:
-//   - renderNav() draws the sticky bar itself — wordmark, Now/Review tabs,
-//     theme toggle. Nothing else. It is global navigation, not filtering, so
-//     it holds no scope state.
+//   - renderNav() draws the sticky bar itself — wordmark and theme toggle.
+//     Nothing else. There is no longer anything to navigate BETWEEN: the page
+//     is one surface, so the bar holds neither navigation nor scope state.
 //   - createScopeControls() builds ONE instance of the scope-controls widget
 //     (subscription + optional span + chips). Each view MOUNTS its own
 //     instance on its first substantive card — the card whose meaning the
@@ -58,18 +58,14 @@ function chipLabel(dim, value) {
 
 /* ---------------------------------------------------------------- nav bar */
 
-let navHandlers = {};
-
-/** renderNav renders/updates the sticky top bar: wordmark, view tabs, theme
- *  toggle — nothing else. `root` is the static `<header id="scope">` from
+/** renderNav renders/updates the sticky top bar: wordmark and theme toggle —
+ *  nothing else. The view tabs are gone with the view: the page is one
+ *  continuous surface. `root` is the static `<header id="scope">` from
  *  index.html (always present, never recreated), so listeners are bound
  *  exactly once behind a `data-bound` guard the same way the whole bar used
  *  to be before Task 15 split it. */
-export function renderNav(root, state, cb) {
-  navHandlers = cb || {};
+export function renderNav(root) {
   if (!root.dataset.bound) {
-    $('#tab-now', root).addEventListener('click', () => navHandlers.onView && navHandlers.onView('now'));
-    $('#tab-review', root).addEventListener('click', () => navHandlers.onView && navHandlers.onView('review'));
     // Theme toggle: copied verbatim from the old page's click handler.
     $('#theme', root).addEventListener('click', () => {
       const cur = document.documentElement.getAttribute('data-theme');
@@ -79,8 +75,6 @@ export function renderNav(root, state, cb) {
     });
     root.dataset.bound = '1';
   }
-  $('#tab-now', root).setAttribute('aria-selected', String(state.view === 'now'));
-  $('#tab-review', root).setAttribute('aria-selected', String(state.view === 'review'));
 }
 
 export function setBusy(b) {
