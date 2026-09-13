@@ -751,6 +751,11 @@ function applyAll(root, state, app, ctx, results) {
   section(root, 'r-sessions').replaceChildren(sessionsCard(sessionsR, state, app, ctx.sel));
 }
 
+/** SUMMARY_INDEX is where /v1/summary lands in the fetcher list above. It is
+ *  exported so app.js can read that one result for the spend headline without
+ *  hard-coding a position that a later edit would silently shift. */
+export const SUMMARY_INDEX = 1;
+
 export function renderReview(root, state, app) {
   // A re-render (any state change -- a chip removed, the subscription
   // switched, ...) invalidates whatever brush-commit timer a PREVIOUS render
@@ -767,6 +772,10 @@ export function renderReview(root, state, app) {
 
   const fetchers = [
     get(`/v1/history?${apiQuery(state, { from: ext.start, to: ext.end, extra: { granularity: gran, stack: 'model' } })}`),
+    // SUMMARY_INDEX names this one: app.js reads the same result to draw the
+    // spend headline, rather than fetching /v1/summary a second time. Two
+    // fetches of one figure can land at different moments and disagree on
+    // screen, which is worse than the coupling.
     get(`/v1/summary?${q({ extra: { compare: 1 } })}`),
     get(`/v1/findings?${q()}`),
     get(`/v1/usage?${q({ omitDim: state.g1, extra: { by: DIM_TO_API[state.g1], limit: 50, compare: 1 } })}`),

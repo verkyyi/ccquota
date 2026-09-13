@@ -3,7 +3,8 @@ import { parse, format } from './lib/state.js';
 import { createLoader } from './lib/seq.js';
 import { renderNav, renderScopeControls, setBusy } from './scope.js';
 import { renderNow } from './now.js';
-import { renderReview } from './review.js';
+import { renderReview, SUMMARY_INDEX } from './review.js';
+import { renderSpend } from './spend.js';
 import { renderDetail, closeDetail } from './session.js';
 import { $, el } from './lib/dom.js';
 
@@ -84,7 +85,12 @@ async function load() {
   root.setAttribute('aria-busy', 'true'); setBusy(true);
   const [a, b] = await Promise.all([
     loaders.now.run(nowR.fetchers, nowR.apply),
-    loaders.review.run(reviewR.fetchers, reviewR.apply),
+    loaders.review.run(reviewR.fetchers, (results) => {
+      // The spend headline reads the summary this loader already fetched.
+      const r = results[SUMMARY_INDEX];
+      renderSpend($('#spend'), r && r.status === 'fulfilled' ? r.value : null);
+      reviewR.apply(results);
+    }),
   ]);
   if (a && b) {
     root.setAttribute('aria-busy', 'false');
