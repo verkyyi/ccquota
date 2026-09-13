@@ -648,8 +648,8 @@ Point any MCP client at `https://your-hub/mcp` with the viewer token as a bearer
 }}}
 ```
 
-Twenty read-only tools: `list_accounts`, `get_limits`, `list_endpoints`, `usage_by_source`,
-`usage_by_account`, `list_account_switches`, `list_endpoint_accounts`,
+Twenty-one read-only tools: `list_accounts`, `get_limits`, `list_endpoints`, `usage_by_source`,
+`usage_by_provider`, `usage_by_account`, `list_account_switches`, `list_endpoint_accounts`,
 `usage_by_endpoint`, `usage_by_user`, `usage_by_project`, `usage_by_session`,
 `usage_history`, `usage_summary`, `list_sessions`, `get_session`,
 `get_findings`, `get_collectors`, `get_account_usage`, `get_live`, `quota_history`.
@@ -830,6 +830,13 @@ single blended cost figure.** There are three:
 | **subscription spend** | what the plans cost per month | **real** | `subscription_plans`, `ccquota plan --spend`, `subscription_spend` in the API |
 | **notional token cost** | "what this would have cost at API rates" (`claude`, `codex`) | no | the `notional` entries of `cost` |
 | **gateway cost** | metered per call | **real** | the `billed` entries of `cost` |
+
+Provider is a grouping axis *inside* the billed kind, never a fourth kind of
+money. `usage_by_provider` (and `?by=provider`) returns the same per-source
+`cost` split as every other breakdown. An empty provider is the reporting side
+declaring none — Claude transcripts carry no upstream, and rollup rows
+aggregated before the hub gained the dimension were not re-attributed — not a
+vendor called "unknown"; responses containing one carry `provider_note`.
 
 Real spend is **subscription + gateway**. The notional figure is not a term in
 it, and adding it in invents spending that never happened.
