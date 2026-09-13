@@ -100,6 +100,9 @@ func migrate(db *sql.DB) error {
 	if err := migrateSources(db); err != nil {
 		return err
 	}
+	if err := migrateHourlyProvider(db); err != nil {
+		return err
+	}
 	return migrateDetails(db)
 }
 
