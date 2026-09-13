@@ -873,6 +873,45 @@ arithmetic, and `TestEveryRawCostSumDeclaresItself` fails the build if a new
 `SUM(cost_usd)` appears in the store without either going through the source
 split or stating in the SQL why its `GROUP BY` already covers it.
 
+## Upgrading to the provider dimension
+
+This release adds `provider` — the upstream that actually served a request — to
+`usage_events` and to `usage_hourly`'s primary key. It matters because a gateway
+that fails over between vendors reaches one model id through several upstreams
+at several contracted prices, so a rate keyed on the model alone prices some
+calls at another vendor's number.
+
+**Back up the database before the first start.** The `usage_hourly` change
+rebuilds the table (SQLite cannot alter a primary key); `~/.ccquota/backups/` is
+the conventional place.
+
+Existing raw events are backfilled from `details.model_provider`, which the
+reporting side has been sending all along, so no collector has to change.
+
+**Then rebuild the rollup, or the dimension reports nothing:**
+
+```bash
+ccquota hub --rebuild-rollup --rebuild-rollup-force
+```
+
+Every breakdown reads `usage_hourly`, and the migration carries pre-existing
+hour-rows across with an *empty* provider rather than guessing one — so until
+they are re-derived, the dimension answers "not declared" for all history and
+looks broken rather than empty. The rebuild re-derives whatever raw events
+retention still covers and leaves pre-retention hours untouched.
+`--rebuild-rollup` on its own **refuses**, precisely because it would otherwise
+erase hours whose raw rows have already been pruned; the `--force` variant is
+the one that skips them instead. The startup log names the affected row count
+and repeats this command.
+
+Rehearsed against a 394 MB production snapshot: 41,462 rows rebuilt in under ten
+seconds, every event count and token total unchanged, the only movement being
+the last bit of a float64 cost sum as the addition order changed.
+
+Gateway rates keyed on a bare model id keep working and now mean "this price
+holds whoever serves it". State per-contract rates under `gateway.providers`
+when two upstreams serve one model id at different prices.
+
 ## Development
 
 ```bash
