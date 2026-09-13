@@ -5,6 +5,9 @@ import { renderNav, renderScopeControls, setBusy } from './scope.js';
 import { renderNow } from './now.js';
 import { renderReview, SUMMARY_INDEX } from './review.js';
 import { renderSpend } from './spend.js';
+import { renderConsumption } from './consumption.js';
+import { apiQuery } from './lib/state.js';
+import { extent, resolve } from './lib/brush.js';
 import { renderDetail, closeDetail } from './session.js';
 import { $, el } from './lib/dom.js';
 
@@ -29,7 +32,7 @@ export const app = {
   },
 };
 
-const loaders = { now: createLoader(), review: createLoader() };
+const loaders = { now: createLoader(), review: createLoader(), consumption: createLoader() };
 let lastRendered = '';
 
 function route() {
@@ -82,9 +85,21 @@ async function load() {
   // overwriting a newer scope.
   const nowR = renderNow($('#status'), s, app);
   const reviewR = renderReview($('#analysis'), s, app);
+  // Same range the analysis section resolves, so the consumption table and the
+  // charts below it are answering about one period. Duplicating the arithmetic
+  // here would let the two drift apart the first time the brush logic changes.
+  const range = resolve({ from: s.from, to: s.to }, s.span, app.now());
+  const consumptionR = {
+    fetchers: [(signal) => app.api('/v1/usage?' + apiQuery(s, {
+      from: range.from, to: range.to, omitDim: 'provider',
+      extra: { by: 'provider', limit: 50 },
+    }), signal)],
+    apply: ([r]) => renderConsumption($('#consumption'), r, s, app, range),
+  };
   root.setAttribute('aria-busy', 'true'); setBusy(true);
-  const [a, b] = await Promise.all([
+  const [a, b, c] = await Promise.all([
     loaders.now.run(nowR.fetchers, nowR.apply),
+    loaders.consumption.run(consumptionR.fetchers, consumptionR.apply),
     loaders.review.run(reviewR.fetchers, (results) => {
       // The spend headline reads the summary this loader already fetched.
       const r = results[SUMMARY_INDEX];
@@ -92,9 +107,9 @@ async function load() {
       reviewR.apply(results);
     }),
   ]);
-  if (a && b) {
+  if (a && b && c) {
     root.setAttribute('aria-busy', 'false');
-    setBusy(loaders.now.inFlight || loaders.review.inFlight);
+    setBusy(loaders.now.inFlight || loaders.review.inFlight || loaders.consumption.inFlight);
   }
 }
 
