@@ -784,10 +784,31 @@ them in the `--pricing` file, in the currency the vendors publish:
     "cny_per_usd": 7.09,
     "cny_per_usd_as_of": "2026-09-12",
     "price_source": "https://internal.example/gateway/pricing",
-    "models": { "vendor-large": { "input": 7.0, "output": 70.0 } }
+    "models": { "vendor-large": { "input": 7.0, "output": 70.0 } },
+    "providers": {
+      "dashscope.aliyuncs.com": {
+        "label": "阿里云百炼",
+        "models": { "qwen-plus": { "input": 0.8, "output": 2.0 } }
+      },
+      "ark.cn-beijing.volces.com": {
+        "label": "火山方舟",
+        "models": { "deepseek-v4-flash": { "input": 0.5, "output": 1.5 } }
+      }
+    }
   }
 }
 ```
+
+A gateway that fans out to several upstreams reaches the same model id at more
+than one contracted price, and failover decides which one served any given
+call — so a rate keyed on the model alone prices some calls at another
+vendor’s number. State each contract under `providers`, keyed by the provider
+string the reporting side sends (this deployment sends the upstream hostname).
+
+`models` at the top level still means **this price holds whoever serves it**,
+and answers only what a provider left unsaid: a provider block is authoritative
+for the models it names. `label` is display only and never affects a rate.
+Every priced event’s `price_basis` names the contract it used.
 
 Rates are **CNY per million tokens**, input and output only — the source
 carries no cache breakdown. They are converted to USD at `cny_per_usd`, a
