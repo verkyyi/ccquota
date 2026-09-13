@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"strings"
 )
 
@@ -49,12 +50,30 @@ func migrateHourlyProvider(db *sql.DB) error {
 		return err
 	}
 	cols := strings.Join(keep, ", ")
+	var carried int64
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM usage_hourly_before_provider`).Scan(&carried); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(`INSERT INTO usage_hourly (` + cols + `, provider)
 		SELECT ` + cols + `, '' FROM usage_hourly_before_provider;
 		DROP TABLE usage_hourly_before_provider;
 		CREATE INDEX IF NOT EXISTS idx_hourly_account_hour ON usage_hourly(account_uuid, hour);
 		CREATE INDEX IF NOT EXISTS idx_hourly_session ON usage_hourly(account_uuid, session_id)`); err != nil {
 		return fmt.Errorf("migrate hourly provider: %w", err)
+	}
+	if carried > 0 {
+		// Say it out loud. Every read path for a breakdown goes through
+		// usage_hourly, so until these rows are re-derived the provider
+		// dimension answers "" for ALL history and the feature looks broken
+		// rather than empty. The operator cannot infer that from a silent
+		// migration, and the rebuild is their call: it is expensive and it
+		// touches history, which is not something a startup should do behind
+		// their back.
+		log.Printf("provider: carried %d pre-existing usage_hourly row(s) across with an empty provider — "+
+			"raw events keep theirs, but every breakdown reads the rollup, so the provider dimension "+
+			"will report nothing for this history until you run "+
+			"`ccquota hub --rebuild-rollup --rebuild-rollup-force`, which re-derives whatever raw events "+
+			"still cover and leaves pre-retention hours untouched", carried)
 	}
 	return tx.Commit()
 }
