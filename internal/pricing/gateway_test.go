@@ -73,7 +73,9 @@ func TestGatewayCost_UnconfiguredModelIsNilWithAReason(t *testing.T) {
 	if got := Default().Cost(ev); got != nil {
 		t.Fatalf("cost = %v, want nil for a model with no configured rate", *got)
 	}
-	if ev.Details.PriceBasis != "unpriced: no gateway rate configured" {
+	// Substring, not equality: the basis also names which contract was missing
+	// once providers exist, and that detail is the actionable half.
+	if !strings.Contains(ev.Details.PriceBasis, "unpriced: no gateway rate configured") {
 		t.Errorf("basis = %q", ev.Details.PriceBasis)
 	}
 }
@@ -216,5 +218,304 @@ func TestGatewayPriceNote_SaysItIsBilled(t *testing.T) {
 		if !strings.Contains(strings.ToLower(GatewayPriceNote), want) {
 			t.Errorf("note is missing %q: %s", want, GatewayPriceNote)
 		}
+	}
+}
+
+// ---- (provider, model) pricing ----------------------------------------
+
+// The same model id served by two upstreams at two contracted prices. This is
+// what the deployment's alias chains actually do on failover, and pricing both
+// at one rate puts a wrong number in the one column that claims to be an
+// invoice.
+const twoProviderFile = `{
+  "gateway": {
+    "rates_as_of": "2026-09-12",
+    "cny_per_usd": 7.0,
+    "cny_per_usd_as_of": "2026-09-12",
+    "providers": {
+      "dashscope.aliyuncs.com":    {"label": "阿里云百炼",
+        "models": {"deepseek-v4-flash": {"input": 10.0, "output": 10.0}}},
+      "ark.cn-beijing.volces.com": {"label": "火山方舟",
+        "models": {"deepseek-v4-flash": {"input": 20.0, "output": 20.0}}}
+    }
+  }
+}`
+
+func gwEvent(provider string) *model.UsageEvent {
+	return &model.UsageEvent{
+		Source: model.SourceGateway, Model: "deepseek-v4-flash", Provider: provider,
+		InputTokens: 1_000_000, OutputTokens: 0,
+		Details: &model.UsageDetails{Provider: provider},
+	}
+}
+
+func TestGatewayCost_SameModelTwoProvidersTwoPrices(t *testing.T) {
+	tbl := gatewayTable(t, twoProviderFile)
+
+	cheap := tbl.Cost(gwEvent("dashscope.aliyuncs.com"))
+	dear := tbl.Cost(gwEvent("ark.cn-beijing.volces.com"))
+	if cheap == nil || dear == nil {
+		t.Fatalf("both should price: cheap=%v dear=%v", cheap, dear)
+	}
+	if math.Abs(*cheap-10.0/7.0) > 1e-9 {
+		t.Errorf("dashscope = %v, want %v", *cheap, 10.0/7.0)
+	}
+	if math.Abs(*dear-20.0/7.0) > 1e-9 {
+		t.Errorf("ark = %v, want %v", *dear, 20.0/7.0)
+	}
+	if *cheap == *dear {
+		t.Error("two providers priced identically — the flat key bug is still here")
+	}
+}
+
+func TestGatewayCost_BasisNamesTheProvider(t *testing.T) {
+	tbl := gatewayTable(t, twoProviderFile)
+	e := gwEvent("ark.cn-beijing.volces.com")
+	tbl.Cost(e)
+	if !strings.Contains(e.Details.PriceBasis, "ark.cn-beijing.volces.com") {
+		t.Errorf("price basis %q does not name the provider it priced on", e.Details.PriceBasis)
+	}
+}
+
+// A flat entry means "this price holds whoever serves it" — a legitimate thing
+// to say, and the fallback when a provider declares no rate for the model.
+func TestGatewayCost_FlatTableAppliesWhenProviderDeclaresNothing(t *testing.T) {
+	tbl := gatewayTable(t, `{
+	  "gateway": {
+	    "rates_as_of": "2026-09-12", "cny_per_usd": 7.0, "cny_per_usd_as_of": "2026-09-12",
+	    "models": {"deepseek-v4-flash": {"input": 7.0, "output": 7.0}},
+	    "providers": {"ark.cn-beijing.volces.com": {"models": {"qwen-plus": {"input": 1.0, "output": 1.0}}}}
+	  }
+	}`)
+	// ark declares a rate for qwen-plus but not for deepseek-v4-flash, so the
+	// flat entry answers.
+	got := tbl.Cost(gwEvent("ark.cn-beijing.volces.com"))
+	if got == nil {
+		t.Fatal("should fall back to the flat table")
+	}
+	if math.Abs(*got-1.0) > 1e-9 {
+		t.Errorf("= %v, want 1.0", *got)
+	}
+}
+
+// A provider block is authoritative for the models it names: the flat table
+// must not silently answer for a contract that stated its own price.
+func TestGatewayCost_ProviderBlockBeatsFlatTable(t *testing.T) {
+	tbl := gatewayTable(t, `{
+	  "gateway": {
+	    "rates_as_of": "2026-09-12", "cny_per_usd": 7.0, "cny_per_usd_as_of": "2026-09-12",
+	    "models": {"deepseek-v4-flash": {"input": 7.0, "output": 7.0}},
+	    "providers": {"ark.cn-beijing.volces.com": {"models": {"deepseek-v4-flash": {"input": 70.0, "output": 70.0}}}}
+	  }
+	}`)
+	got := tbl.Cost(gwEvent("ark.cn-beijing.volces.com"))
+	if got == nil || math.Abs(*got-10.0) > 1e-9 {
+		t.Errorf("= %v, want 10.0 (the provider's own rate)", got)
+	}
+}
+
+func TestGatewayCost_UnpricedBasisNamesTheMissingKey(t *testing.T) {
+	tbl := gatewayTable(t, twoProviderFile)
+	e := gwEvent("openrouter.ai")
+	if got := tbl.Cost(e); got != nil {
+		t.Fatalf("= %v, want nil for an unconfigured provider", *got)
+	}
+	if !strings.Contains(e.Details.PriceBasis, "openrouter.ai") {
+		t.Errorf("basis %q should name the provider whose rate is missing", e.Details.PriceBasis)
+	}
+}
+
+func TestGatewayOverride_ProviderRateNeedsRatesAsOf(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "pricing.json")
+	if err := os.WriteFile(p, []byte(`{"gateway":{"providers":{"a":{"models":{"m":{"input":1,"output":1}}}}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Default().LoadOverrides(p); err == nil {
+		t.Error("an undated provider rate must be rejected")
+	}
+}
+
+func TestGatewayOverride_BadProviderRateRejectsWholeFile(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "pricing.json")
+	if err := os.WriteFile(p, []byte(`{
+	  "models": {"claude-opus-5": {"input": 1, "output": 1}},
+	  "gateway": {"rates_as_of":"2026-09-12",
+	    "providers": {"a": {"models": {"m": {"input": 0, "output": 1}}}}}
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tbl := Default()
+	if err := tbl.LoadOverrides(p); err == nil {
+		t.Fatal("a zero rate must be rejected")
+	}
+	// And nothing may have been applied.
+	e := &model.UsageEvent{Model: "claude-opus-5", InputTokens: 1_000_000}
+	if c := tbl.Cost(e); c == nil || math.Abs(*c-5.0) > 1e-9 {
+		t.Errorf("built-in rate was disturbed by a rejected file: %v", c)
+	}
+}
+
+// The empty provider is "not declared" and cannot carry a contract.
+func TestGatewayOverride_EmptyProviderKeyRejected(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "pricing.json")
+	if err := os.WriteFile(p, []byte(`{"gateway":{"rates_as_of":"2026-09-12",
+	  "providers":{"":{"models":{"m":{"input":1,"output":1}}}}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Default().LoadOverrides(p); err == nil {
+		t.Error("an empty provider key must be rejected")
+	}
+}
+
+// ── per-unit gateway rates (#6130) ──────────────────────────────────────────
+//
+// A growing share of what the gateway fronts is not billed per token at all:
+// images by the picture, audio by the second. Before this, those rows had
+// nowhere to land — the shipper skipped them precisely because writing 0
+// tokens would have claimed they were free.
+
+// A contract that prices one model per image and another per second, beside a
+// per-token one. All three shapes coexist in one table on purpose: that is the
+// arrangement a real deployment ends up with.
+const gatewayUnitOverrideFile = `{
+  "gateway": {
+    "rates_as_of": "2026-09-13",
+    "cny_per_usd": 7.0,
+    "cny_per_usd_as_of": "2026-09-11",
+    "price_source": "https://internal.example/gateway/pricing",
+    "models": {
+      "vendor-large": {"input": 7.0, "output": 70.0},
+      "vendor-draw": {"unit": "image", "price": 0.14},
+      "vendor-listen": {"unit": "second", "price": 0.0008}
+    }
+  }
+}`
+
+func unitEvent(m, unit string, usage float64) *model.UsageEvent {
+	return &model.UsageEvent{
+		Source: model.SourceGateway, Model: m,
+		Details: &model.UsageDetails{Usage: &usage, UsageUnit: unit},
+	}
+}
+
+func TestGatewayCost_PricesPerImageAndDisclosesTheUnit(t *testing.T) {
+	ev := unitEvent("vendor-draw", "image", 3)
+	got := gatewayTable(t, gatewayUnitOverrideFile).Cost(ev)
+	// CNY 0.14 × 3 = 0.42, at 7.0 CNY/USD = $0.06.
+	if got == nil || math.Abs(*got-0.06) > 1e-9 {
+		t.Fatalf("cost = %v, want 0.06 (basis %q)", got, ev.Details.PriceBasis)
+	}
+	// The basis has to name the unit and the count, not just a number: a
+	// per-image figure read as per-token is off by six orders of magnitude.
+	for _, want := range []string{"billed:", "CNY 0.14 per image", "3 image", "7.0000 CNY/USD"} {
+		if !strings.Contains(ev.Details.PriceBasis, want) {
+			t.Errorf("basis %q is missing %q", ev.Details.PriceBasis, want)
+		}
+	}
+}
+
+func TestGatewayCost_PricesPerSecond(t *testing.T) {
+	ev := unitEvent("vendor-listen", "second", 125)
+	got := gatewayTable(t, gatewayUnitOverrideFile).Cost(ev)
+	if got == nil || math.Abs(*got-0.1/7.0) > 1e-9 {
+		t.Fatalf("cost = %v (basis %q)", got, ev.Details.PriceBasis)
+	}
+}
+
+// ★ The whole point. A unit-priced model must NEVER fall back to the token
+// columns: an image call carries no tokens, so a fallback would price every
+// one of them at 0.00 and report a real bill as free — silently.
+func TestGatewayCost_UnitRateNeverFallsBackToTokens(t *testing.T) {
+	ev := &model.UsageEvent{
+		Source: model.SourceGateway, Model: "vendor-draw",
+		InputTokens: 1_000_000, OutputTokens: 1_000_000, // present, and irrelevant
+		Details: &model.UsageDetails{}, // no Usage declared
+	}
+	if got := gatewayTable(t, gatewayUnitOverrideFile).Cost(ev); got != nil {
+		t.Fatalf("cost = %v, want nil: a per-image model must not be priced off token counts", *got)
+	}
+	if !strings.Contains(ev.Details.PriceBasis, "priced per image, but this event declared no usage") {
+		t.Errorf("basis %q does not say why", ev.Details.PriceBasis)
+	}
+}
+
+// A mismatched unit is a wiring bug between shipper and rate table. Multiplying
+// anyway would put a confidently wrong number in a column that means real money.
+func TestGatewayCost_UnitMismatchIsUnpricedAndNamesBoth(t *testing.T) {
+	ev := unitEvent("vendor-draw", "second", 3)
+	if got := gatewayTable(t, gatewayUnitOverrideFile).Cost(ev); got != nil {
+		t.Fatalf("cost = %v, want nil for an image rate fed seconds", *got)
+	}
+	b := ev.Details.PriceBasis
+	if !strings.Contains(b, "priced per image") || !strings.Contains(b, `usage in "second"`) {
+		t.Errorf("basis %q must name both the rate's unit and the event's", b)
+	}
+}
+
+// Zero usage is a measurement; nobody-told-us is not. Same nil-not-zero rule
+// the rest of the package keeps.
+func TestGatewayCost_ZeroUsageIsZeroNotNil(t *testing.T) {
+	ev := unitEvent("vendor-draw", "image", 0)
+	got := gatewayTable(t, gatewayUnitOverrideFile).Cost(ev)
+	if got == nil || *got != 0 {
+		t.Fatalf("cost = %v, want 0 for a declared zero usage", got)
+	}
+}
+
+// Both shapes in one rate would price the same event twice, and there is no
+// reading of that result that is correct — so it is rejected at startup, not
+// resolved at runtime.
+func TestGatewayOverrides_RejectRateCarryingBothShapes(t *testing.T) {
+	doc := `{"gateway": {"rates_as_of": "2026-09-13", "models":
+	  {"both": {"input": 1.0, "output": 2.0, "unit": "image", "price": 0.1}}}}`
+	p := filepath.Join(t.TempDir(), "pricing.json")
+	if err := os.WriteFile(p, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := Default().LoadOverrides(p)
+	if err == nil || !strings.Contains(err.Error(), "one shape or the other") {
+		t.Fatalf("err = %v, want a rejection naming the conflict", err)
+	}
+}
+
+// A typo'd unit would never match an event's UsageUnit, so every row would go
+// silently unpriced. Loud at startup beats quiet forever.
+func TestGatewayOverrides_RejectUnknownUnit(t *testing.T) {
+	doc := `{"gateway": {"rates_as_of": "2026-09-13", "models":
+	  {"odd": {"unit": "picture", "price": 0.1}}}}`
+	p := filepath.Join(t.TempDir(), "pricing.json")
+	if err := os.WriteFile(p, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := Default().LoadOverrides(p)
+	if err == nil || !strings.Contains(err.Error(), "unknown billing unit") {
+		t.Fatalf("err = %v, want a rejection naming the bad unit", err)
+	}
+}
+
+// Zero is not a discount — the same rule the token shape already keeps. A
+// per-unit rate of 0 would price a real charge at 0.00 and read as free.
+func TestGatewayOverrides_RejectZeroUnitPrice(t *testing.T) {
+	doc := `{"gateway": {"rates_as_of": "2026-09-13", "models":
+	  {"free": {"unit": "image", "price": 0}}}}`
+	p := filepath.Join(t.TempDir(), "pricing.json")
+	if err := os.WriteFile(p, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := Default().LoadOverrides(p)
+	if err == nil || !strings.Contains(err.Error(), "positive price per image") {
+		t.Fatalf("err = %v, want a rejection of the zero price", err)
+	}
+}
+
+// The two shapes coexist: adding unit rates must not disturb the token ones.
+func TestGatewayCost_TokenShapeStillWorksBesideUnitRates(t *testing.T) {
+	ev := gatewayEvent()
+	got := gatewayTable(t, gatewayUnitOverrideFile).Cost(ev)
+	if got == nil || math.Abs(*got-11.0) > 1e-9 {
+		t.Fatalf("cost = %v, want 11.0 (basis %q)", got, ev.Details.PriceBasis)
+	}
+	if !strings.Contains(ev.Details.PriceBasis, "per MTok") {
+		t.Errorf("token basis %q should still say per MTok", ev.Details.PriceBasis)
 	}
 }

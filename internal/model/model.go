@@ -14,6 +14,51 @@ const (
 	// vendors. Unlike the other two it is billed per call, so its CostUSD is
 	// an actual charge rather than an API-equivalent estimate.
 	SourceGateway = "gateway"
+	// SourceVendorBill is spend read straight off a vendor's invoice rather
+	// than metered from a request. It exists because some spend never passes
+	// through anything this hub can observe: asynchronous task APIs (video
+	// generation, file transcription) hand back a vendor-signed result URL and
+	// require publicly fetchable input, so no proxy sits in that data path —
+	// yet the money is real and, measured on the deployment that prompted this,
+	// larger than everything the gateway does see.
+	//
+	// Its CostUSD is THE INVOICE: taken as supplied and never recomputed from a
+	// rate table (see pricing.Table.Cost). Consequences, all deliberate:
+	//   - no per-app attribution. A daily invoice line has no consumer, and
+	//     splitting it by call share would be an estimate wearing real money's
+	//     clothes.
+	//   - no token counters. The billing unit is seconds, images or calls.
+	//   - the collector must only ingest a billing day once the vendor has
+	//     settled it: dedup is by MessageUUID, so a later revision of the same
+	//     day is ignored rather than corrected.
+	SourceVendorBill = "vendor_bill"
+	// SourceVoice is model usage an application reports about itself, for calls
+	// that no proxy in this deployment can observe. It exists for the WebSocket
+	// tier — realtime speech recognition and streaming speech synthesis — where
+	// the credential rides the handshake and the audio then flows as frames: a
+	// gateway could proxy it, but only by becoming a single point in a live
+	// phone call, which is a far larger cost than the visibility is worth at the
+	// volumes that prompted this.
+	//
+	// It is the counterpart of SourceVendorBill, and the two divide the work by
+	// what each can actually know:
+	//
+	//   - This source carries USAGE and attribution. The app knows which tenant
+	//     the call served, how many seconds it listened and how many characters
+	//     it spoke. Measured on the deployment that prompted this, the invoice
+	//     knows none of that: the vendor's own bill reported 0 seconds of speech
+	//     recognition while the agent was demonstrably running.
+	//   - The invoice carries the MONEY. Rows here stay unpriced unless a
+	//     collector supplies a charge, and a billing item may be priced by
+	//     exactly one side — whatever this source prices must be excluded from
+	//     the bill collector's include list, or the same spend lands twice.
+	//     Unpriced is the safe default precisely because double counting is the
+	//     one error this ledger must never make.
+	//
+	// Its billing units are seconds and characters, so like SourceVendorBill it
+	// carries no token counters — and an event here must never be given an
+	// estimated token count to make it look like the rest.
+	SourceVoice = "voice"
 )
 
 // UsageSource preserves compatibility with agents and rows predating sources.
@@ -38,6 +83,18 @@ type UsageEvent struct {
 	RequestID   string    `json:"request_id"`   // diagnostic only
 	TS          time.Time `json:"ts"`
 	Model       string    `json:"model"`
+
+	// Provider is the upstream that actually served this request.
+	//
+	// It is a separate fact from Model and from Source. A gateway with failover
+	// reaches the same model id through more than one upstream at more than one
+	// contracted price, so the model id alone cannot identify the contract --
+	// see internal/pricing/gateway.go. Senders may set it directly; the hub also
+	// reads it from Details.Provider, which is what the gateway shipper sends.
+	//
+	// Empty means NOT DECLARED, which is the honest state for a Claude
+	// transcript. It is never filled in by inference.
+	Provider string `json:"provider,omitempty"`
 
 	InputTokens   int64 `json:"input_tokens"`
 	OutputTokens  int64 `json:"output_tokens"`
