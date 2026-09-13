@@ -924,7 +924,7 @@ event twice. Per-unit rows price off the event's own declared usage and never
 fall back to the token columns: an image call carries no tokens, so a fallback
 would price every one of them at 0.00 and report a real bill as free.
 
-#### Contracts priced by time of day
+### Contracts priced by time of day
 
 Some contracts charge a multiple at peak hours. State the window and let the
 event's own timestamp decide which tier it fell in:
