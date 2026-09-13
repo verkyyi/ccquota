@@ -134,6 +134,10 @@ CREATE TABLE IF NOT EXISTS usage_events (
   request_id             TEXT NOT NULL DEFAULT '',
   ts                     TEXT NOT NULL,          -- RFC3339 UTC
   model                  TEXT NOT NULL DEFAULT '',
+  -- The upstream that actually served the request. Empty means the reporting
+  -- side declared none, which is the honest state for a Claude transcript --
+  -- never a vendor called "unknown".
+  provider               TEXT NOT NULL DEFAULT '',
 
   input_tokens           INTEGER NOT NULL DEFAULT 0,
   output_tokens          INTEGER NOT NULL DEFAULT 0,

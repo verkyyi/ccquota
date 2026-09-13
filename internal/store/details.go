@@ -31,6 +31,16 @@ func migrateDetails(db *sql.DB) error {
 			return err
 		}
 	}
+	// Lift the provider out of details_json for rows written before the column
+	// existed. The value has been arriving since the gateway shipper's first
+	// run; it was simply not groupable. Idempotent, and it never overwrites a
+	// provider a sender stated directly.
+	if _, err := db.Exec(`UPDATE usage_events
+		   SET provider = json_extract(details_json, '$.model_provider')
+		 WHERE provider = ''
+		   AND json_extract(details_json, '$.model_provider') IS NOT NULL`); err != nil {
+		return fmt.Errorf("backfill usage_events.provider: %w", err)
+	}
 	return nil
 }
 
