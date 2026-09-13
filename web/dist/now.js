@@ -97,13 +97,29 @@ function applyCounter(c) {
   hero.until = c.project_until ? new Date(c.project_until).getTime() : 0;
 
   if (!heroWrapEl.firstChild) {
-    heroWrapEl.replaceChildren(el('div', { class: 'hero', id: 'hero-root' },
+    // A BADGE, not a hero.
+    //
+    // This counter used to open the page at up to 40px with a 1.7em animated
+    // character, under a full-width caption row. It is a lifetime token total:
+    // it never goes down, it is not a bill, and nothing is decided by it — so
+    // being the largest and liveliest thing on a ledger earned it attention no
+    // other figure could compete with. Shrunk to one line, it still answers
+    // "is the fleet moving" at a glance, which is the only question it was ever
+    // good for.
+    //
+    // The caption moves inside the badge and shortens; the part that names the
+    // scope moves to the title, because it repeats what the scope controls
+    // directly above already say.
+    heroWrapEl.replaceChildren(el('div', {
+      class: 'hero', id: 'hero-root',
+      title: 'tokens consumed · selected account and source · all time · projected between measurements',
+    },
       el('div', { class: 'tm' }, pacSVG(), dotStream(),
         el('div', { class: 'odo', id: 'hero-odo' },
           // The tilde is the whole honesty marker: this figure is projected
           // between measurements and is not exact. One character, always present.
-          el('span', { class: 'tilde' }, '~'))),
-      el('div', { class: 'k' }, 'tokens consumed · selected account and source · all time')));
+          el('span', { class: 'tilde' }, '~')),
+        el('span', { class: 'k' }, 'tokens · all time'))));
   }
   if (!hero.raf) tickHero();
 }
