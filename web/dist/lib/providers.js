@@ -44,19 +44,22 @@ export const SOURCE_LABEL = {
   codex: 'Codex',
   gateway: 'AI gateway',
   vendor_bill: 'Vendor invoice',
+  voice: 'Voice, app-reported',
 };
 
 /** accountGroups splits the account list by what an account MEANS for its
  *  source, because the word differs. On claude and codex it is a subscription
  *  somebody pays for monthly; a vendor_bill "account" is likewise a billing
  *  relationship, an invoice. On gateway it is one CALLING APPLICATION, since
- *  the shipper maps one APISIX consumer to one account. A single flat list
- *  under either word is wrong about the other half of its options.
+ *  the shipper maps one APISIX consumer to one account — and a voice account
+ *  is that same thing reached another way: the application reports its own
+ *  WebSocket calls, so the account names the caller, never a bill. A single
+ *  flat list under either word is wrong about the other half of its options.
  *
  *  An empty group is omitted rather than rendered: a heading over nothing
  *  promises options this hub does not have. */
 export function accountGroups(accounts) {
-  const kind = (a) => (UsageSource(a.source) === 'gateway' ? 'app' : 'sub');
+  const kind = (a) => (CALLER_SOURCES.has(UsageSource(a.source)) ? 'app' : 'sub');
   const label = { sub: 'Subscriptions', app: 'Calling applications' };
   const name = (a) => a.email || a.display_name || a.account_uuid;
   return ['sub', 'app']
@@ -73,3 +76,8 @@ export function accountGroups(accounts) {
 // the same rule model.UsageSource applies in Go. Kept local so this module
 // stays free of imports beyond what it already has.
 const UsageSource = (s) => s || 'claude';
+
+// The sources whose "account" is a caller rather than a billing relationship.
+// A set, not a comparison, because there are now two of them and the next one
+// should be an entry here rather than another `||` nobody reads.
+const CALLER_SOURCES = new Set(['gateway', 'voice']);

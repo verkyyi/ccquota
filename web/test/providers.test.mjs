@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {selectLive, windowName, pricingCoverage, loginLabel, accountGroups} from '../dist/lib/providers.js';
+import {selectLive, windowName, pricingCoverage, loginLabel, accountGroups, SOURCE_LABEL} from '../dist/lib/providers.js';
 import {fmtCost} from '../dist/lib/format.js';
 
 test('missing costs stay unknown across bucket and session totals',()=>{
@@ -83,4 +83,30 @@ test('vendor_bill sits with the subscriptions, not the applications', () => {
 test('an account with no name falls back to its uuid', () => {
   const g = accountGroups([{ account_uuid: 'bare-uuid', source: 'claude' }]);
   assert.equal(g[0].options[0].text, 'bare-uuid');
+});
+
+// A voice account is the application that reported the call, not a bill: the
+// source exists because the invoice knows nothing about those sessions. So it
+// groups with the gateway's callers, opposite vendor_bill.
+test('voice sits with the applications, not the subscriptions', () => {
+  const g = accountGroups([
+    { account_uuid: 'v', source: 'voice', display_name: 'lingsheng agent' },
+    { account_uuid: 'b', source: 'gateway', display_name: 'aicall' },
+    { account_uuid: 'i', source: 'vendor_bill', display_name: 'ark bill' },
+  ]);
+  // Order inside a group is the caller's list order, not this function's
+  // business; what is asserted is WHICH group each account lands in.
+  assert.deepEqual(g.find((x) => x.label === 'Calling applications').options.map((o) => o.value).sort(), ['b', 'v']);
+  assert.deepEqual(g.find((x) => x.label === 'Subscriptions').options.map((o) => o.value), ['i']);
+});
+
+// An unlabelled source falls through to its bare identifier in the picker,
+// which is a silent failure: nothing goes red, the control just reads `voice`
+// beside "Claude Code". web/embed_test.go holds the same line against
+// model.Sources so a source added in Go cannot ship unnamed here.
+test('every source this build offers has a human name', () => {
+  for (const s of ['claude', 'codex', 'gateway', 'vendor_bill', 'voice']) {
+    assert.equal(typeof SOURCE_LABEL[s], 'string', `${s} has no label`);
+    assert.notEqual(SOURCE_LABEL[s], s);
+  }
 });

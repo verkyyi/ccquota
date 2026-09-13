@@ -4,6 +4,8 @@ import (
 	"io/fs"
 	"strings"
 	"testing"
+
+	"github.com/verkyyi/ccquota/internal/model"
 )
 
 // The dashboard is embedded, so a missing web/dist is not a cosmetic problem:
@@ -138,6 +140,46 @@ func TestAssets_UserPageIsEmbedded(t *testing.T) {
 	for _, want := range []string{"/v1/user", "os_user"} {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("user page is missing %q", want)
+		}
+	}
+}
+
+// A source this build knows must be nameable by the page that offers it, and a
+// billed one must be a named term of real spend.
+//
+// Both failures are silent, which is why they get a test rather than a review
+// habit. lib/providers.js's SOURCE_LABEL falls through to the bare identifier,
+// so an unlabelled source just reads "voice" in the picker beside "Claude
+// Code"; lib/spend.js names the terms of the headline figure from its own
+// list, so a source missing from it is money absent from the breakdown under a
+// total that still includes it. That is how `voice` — added to model.Sources
+// while this page was being rebuilt — would have shipped.
+//
+// The Go side is the anchor on purpose: model.Sources is where a source is
+// born, and the point is that adding one there turns THIS red. No label text
+// is asserted; that is the page's business.
+func TestDashboard_EverySourceIsNamedAndEveryChargeIsATerm(t *testing.T) {
+	assets := Assets()
+	read := func(name string) string {
+		b, err := fs.ReadFile(assets, name)
+		if err != nil {
+			t.Fatalf("%s unreadable: %v", name, err)
+		}
+		return string(b)
+	}
+	providers, spend := read("lib/providers.js"), read("lib/spend.js")
+	for _, src := range model.Sources {
+		if !strings.Contains(providers, src+": '") {
+			t.Errorf("lib/providers.js SOURCE_LABEL has no entry for %q; the source picker would show the bare identifier", src)
+		}
+		if model.CostKind(src) != model.CostBilled {
+			continue
+		}
+		// api.RealSpend carries one field per billed source, so spendTerms must
+		// name each of them or the terms it prints do not add up to the total
+		// printed above them.
+		if !strings.Contains(spend, "'"+src+"'") {
+			t.Errorf("lib/spend.js does not name %q, a billed source; its money would vanish from the breakdown", src)
 		}
 	}
 }
