@@ -136,7 +136,8 @@ Goals:
 
 Non-goals:
 
-- **No new collector source.** `model.Sources` stays `{claude, codex, gateway}`.
+- **No new collector source.** This work adds none. (`model.Sources` gained
+  `vendor_bill` in #12, which landed while this was in flight — see §8.)
 - **No alias dimension.** The alias a caller asked for (`chat-fast`) is not
   shipped and answering "how much did failover cost me" needs a new field from
   the shipper. Recorded in §7 as follow-up; explicitly out of scope.
@@ -378,3 +379,32 @@ against production.
 3. **Provider labels from the catalog.** `catalog.json` already holds vendor
    slugs; a generator could emit the `--pricing` provider block from it rather
    than having both maintained by hand.
+
+## 8. Reconciliation with `vendor_bill` (#12)
+
+#12 landed a fourth source while this was being built: `vendor_bill`, spend read
+straight off a vendor's invoice for asynchronous task APIs whose data path never
+touches the gateway. Three consequences, none of which change the design:
+
+1. **The provider dimension is unaffected mechanically.** `vendor_bill` is
+   classified `CostBilled` like the gateway, so provider remains a grouping axis
+   inside the billed kind and adds no money kind. The guard in
+   `cost_guard_test.go` covers it because it derives the expected kind from
+   `model.CostKind` rather than listing sources.
+
+2. **It strengthens subproject B's premise.** `vendor_bill` has real charged
+   money, **no tokens at all**, and no per-app attribution. A top-level axis of
+   "source" would give it a column that is empty in every token cell; an axis of
+   *billing relationship* puts it exactly where it belongs, beside the gateway
+   under `metered`. §4.3's consumption table must therefore tolerate a row with
+   cost and no tokens — rendered as an absence, never as zero tokens.
+
+3. **It is the source where a provider is most obviously meaningful,** since a
+   bill is by definition one vendor's. Its collector does not exist yet (it lives
+   in `24haowan-monorepo`); when it is built it should set `provider` to the
+   vendor it is billing for. `ProviderNote` says so, so a blank there reads as
+   "the collector did not state it" rather than "this spend has no vendor".
+
+`real_spend` now has three terms (subscription + gateway + vendor_bill). §4.2's
+headline reuses `RealSpendOver` unchanged and therefore picks this up for free;
+the copy beside it names whichever terms are non-zero rather than a fixed two.

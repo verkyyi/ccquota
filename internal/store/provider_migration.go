@@ -105,4 +105,6 @@ func commonColumns(tx *sql.Tx, from, to string) ([]string, error) {
 const ProviderNote = "An empty provider means the reporting side declared none: " +
 	"Claude transcripts carry no upstream, and hourly rows aggregated before this " +
 	"hub gained the provider dimension were not re-attributed — they are reported " +
-	"blank rather than assigned to a vendor they may not belong to."
+	"blank rather than assigned to a vendor they may not belong to. A vendor_bill " +
+	"row always has a vendor in principle, since it is read off that vendor's " +
+	"invoice; a blank one there means the collector did not state it."
