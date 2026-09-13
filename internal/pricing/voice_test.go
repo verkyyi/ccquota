@@ -81,3 +81,36 @@ func TestVoiceNoteStatesTheDoubleCountingRule(t *testing.T) {
 		}
 	}
 }
+
+// The usage a voice row carries must live in the non-token pair, never in the
+// token counters. This is the guard against the tempting shortcut: "put the
+// seconds in input_tokens so the existing dashboards show something". Those
+// counters are summed into every token total in this hub, so a speech session
+// borrowing them does not show up as speech — it shows up as tokens nobody
+// spent, in figures nobody re-derives.
+func TestVoiceUsageLivesInItsOwnUnitNotInTokenCounters(t *testing.T) {
+	secs := 125.129
+	ev := &model.UsageEvent{
+		Source: model.SourceVoice, Model: "dashscope/paraformer-realtime-8k-v2",
+		Details: &model.UsageDetails{Usage: &secs, UsageUnit: "second"},
+	}
+	if ev.InputTokens != 0 || ev.OutputTokens != 0 || ev.CacheRead != 0 || ev.Thinking != 0 {
+		t.Fatal("a voice event carries token counters — they will be summed into this hub's token totals")
+	}
+	if ev.Details.Usage == nil || *ev.Details.Usage != secs || ev.Details.UsageUnit != "second" {
+		t.Fatalf("usage = %v %q, want the seconds it actually heard", ev.Details.Usage, ev.Details.UsageUnit)
+	}
+	// Unpriced is still the expected outcome: a unit is not a rate.
+	if got := (&Table{}).Cost(ev); got != nil {
+		t.Errorf("cost = %v — carrying a unit must not make the hub invent a price", *got)
+	}
+}
+
+// A missing amount is nil, not 0 — the same rule the cost column keeps, for
+// the same reason: 0 seconds is a measurement, and "we were not told" is not.
+func TestVoiceUsageAbsentIsNilNotZero(t *testing.T) {
+	d := &model.UsageDetails{}
+	if d.Usage != nil {
+		t.Fatal("zero value of Usage is not nil — an unreported amount would read as a measured 0")
+	}
+}
