@@ -10,6 +10,30 @@ import (
 	"time"
 )
 
+// The sentence templates this package emits. One id per SENTENCE, not per
+// Kind: two spend_spike findings say different things, and a stale agent reads
+// differently depending on whether it has ever reported at all.
+const (
+	TmplRunawaySession    = "runaway_session"
+	TmplUnpricedModel     = "unpriced_model"
+	TmplTimeInCritical    = "time_in_critical"
+	TmplCacheHitDrop      = "cache_hit_drop"
+	TmplSpendSpikeTotal   = "spend_spike_total"
+	TmplSpendSpikeProject = "spend_spike_project"
+	TmplWindowHigh        = "window_high"
+	TmplStaleAgentNever   = "stale_agent_never"
+	TmplStaleAgentLast    = "stale_agent_last"
+	TmplLiveRunaway       = "live_runaway"
+)
+
+// Templates is every id above, so a translation table can be checked for
+// completeness rather than discovered to be missing one in production.
+var Templates = []string{
+	TmplRunawaySession, TmplUnpricedModel, TmplTimeInCritical, TmplCacheHitDrop,
+	TmplSpendSpikeTotal, TmplSpendSpikeProject, TmplWindowHigh,
+	TmplStaleAgentNever, TmplStaleAgentLast, TmplLiveRunaway,
+}
+
 type Finding struct {
 	Severity string            `json:"severity"` // critical | warning | info
 	Kind     string            `json:"kind"`
@@ -17,7 +41,22 @@ type Finding struct {
 	Detail   string            `json:"detail"`
 	Scope    map[string]string `json:"scope,omitempty"` // chips to apply (hash param names)
 	Link     string            `json:"link,omitempty"`  // an in-app anchor, e.g. "#sessions"
-	weight   float64
+
+	// Template names WHICH sentence this is, and Args holds the values
+	// interpolated into it. Together they let a surface re-render the finding in
+	// another language without parsing English back out of Title.
+	//
+	// Kind is not enough on its own: two spend_spike findings say different
+	// things (the period as a whole, and the project driving it), and a stale
+	// agent reads differently depending on whether it has ever reported at all.
+	//
+	// Neither field is serialised. The wire contract is still the rendered
+	// prose, and internal/mcp -- whose consumer is an agent quoting the text --
+	// keeps getting exactly what it got before.
+	Template string            `json:"-"`
+	Args     map[string]string `json:"-"`
+
+	weight float64
 }
 
 type SessionStat struct {
@@ -176,8 +215,14 @@ func runaway(ss []SessionStat, populationMedian int64) []Finding {
 		}
 		out = append(out, Finding{
 			Severity: "critical", Kind: "runaway_session",
-			Title:  fmt.Sprintf("session %s burned %s tokens — %d× the median session", short(s.SessionID), tokens(s.Tokens), mult),
-			Detail: fmt.Sprintf("%s · %s · %s · %d turns", shortPath(s.CWD), s.Model, dur(s.Duration), s.Turns),
+			Title:    fmt.Sprintf("session %s burned %s tokens — %d× the median session", short(s.SessionID), tokens(s.Tokens), mult),
+			Detail:   fmt.Sprintf("%s · %s · %s · %d turns", shortPath(s.CWD), s.Model, dur(s.Duration), s.Turns),
+			Template: TmplRunawaySession,
+			Args: map[string]string{
+				"session": short(s.SessionID), "tokens": tokens(s.Tokens), "mult": fmt.Sprint(mult),
+				"project": shortPath(s.CWD), "model": s.Model, "duration": dur(s.Duration),
+				"turns": fmt.Sprint(s.Turns),
+			},
 			Scope:  map[string]string{"session": s.SessionID},
 			Link:   "#sessions",
 			weight: float64(s.Tokens),
@@ -194,10 +239,12 @@ func unpriced(ms []ModelStat) []Finding {
 		}
 		out = append(out, Finding{
 			Severity: "warning", Kind: "unpriced_model",
-			Title:  fmt.Sprintf("%s: %d requests have incomplete pricing", m.Model, m.Unpriced),
-			Detail: "A price or required usage metadata is missing. These requests are excluded from cost totals; their cost is unknown.",
-			Scope:  map[string]string{"model": m.Model},
-			weight: float64(m.Tokens),
+			Title:    fmt.Sprintf("%s: %d requests have incomplete pricing", m.Model, m.Unpriced),
+			Detail:   "A price or required usage metadata is missing. These requests are excluded from cost totals; their cost is unknown.",
+			Template: TmplUnpricedModel,
+			Args:     map[string]string{"model": m.Model, "n": fmt.Sprint(m.Unpriced)},
+			Scope:    map[string]string{"model": m.Model},
+			weight:   float64(m.Tokens),
 		})
 	}
 	return out
@@ -215,8 +262,13 @@ func critical(cs []AccountCritical, selectionSeconds int64) []Finding {
 		}
 		out = append(out, Finding{
 			Severity: sev, Kind: "time_in_critical",
-			Title:  fmt.Sprintf("%s spent %s above 90%% of its 5-hour window", c.Label, dur(time.Duration(c.Seconds)*time.Second)),
-			Detail: fmt.Sprintf("%d episode(s) · previous period %s", c.Episodes, dur(time.Duration(c.PrevSeconds)*time.Second)),
+			Title:    fmt.Sprintf("%s spent %s above 90%% of its 5-hour window", c.Label, dur(time.Duration(c.Seconds)*time.Second)),
+			Detail:   fmt.Sprintf("%d episode(s) · previous period %s", c.Episodes, dur(time.Duration(c.PrevSeconds)*time.Second)),
+			Template: TmplTimeInCritical,
+			Args: map[string]string{
+				"label": c.Label, "duration": dur(time.Duration(c.Seconds) * time.Second),
+				"episodes": fmt.Sprint(c.Episodes), "prev": dur(time.Duration(c.PrevSeconds) * time.Second),
+			},
 			Link:   "#wall-history",
 			weight: float64(c.Seconds),
 		})
@@ -241,8 +293,14 @@ func cacheDrop(cur, prev []ProjectStat) []Finding {
 		}
 		out = append(out, Finding{
 			Severity: "info", Kind: "cache_hit_drop",
-			Title:  fmt.Sprintf("cache hit on %s fell %.0f%% → %.0f%%", shortPath(p.CWD), q.CacheHit*100, p.CacheHit*100),
-			Detail: "Turns there re-read context instead of hitting cache; each turn costs more than it did.",
+			Title:    fmt.Sprintf("cache hit on %s fell %.0f%% → %.0f%%", shortPath(p.CWD), q.CacheHit*100, p.CacheHit*100),
+			Detail:   "Turns there re-read context instead of hitting cache; each turn costs more than it did.",
+			Template: TmplCacheHitDrop,
+			Args: map[string]string{
+				"project": shortPath(p.CWD),
+				"from":    fmt.Sprintf("%.0f%%", q.CacheHit*100),
+				"to":      fmt.Sprintf("%.0f%%", p.CacheHit*100),
+			},
 			Scope:  map[string]string{"project": p.CWD},
 			weight: drop,
 		})
@@ -256,8 +314,13 @@ func spike(in Inputs) []Finding {
 		ratio := float64(in.Tokens) / float64(in.PrevTokens)
 		out = append(out, Finding{
 			Severity: "info", Kind: "spend_spike",
-			Title:  fmt.Sprintf("tokens are %.1f× the previous period", ratio),
-			Detail: fmt.Sprintf("%s vs %s", tokens(in.Tokens), tokens(in.PrevTokens)),
+			Title:    fmt.Sprintf("tokens are %.1f× the previous period", ratio),
+			Detail:   fmt.Sprintf("%s vs %s", tokens(in.Tokens), tokens(in.PrevTokens)),
+			Template: TmplSpendSpikeTotal,
+			Args: map[string]string{
+				"ratio":  fmt.Sprintf("%.1f", ratio),
+				"tokens": tokens(in.Tokens), "prev": tokens(in.PrevTokens),
+			},
 			weight: ratio,
 		})
 		var top *ProjectStat
@@ -271,9 +334,14 @@ func spike(in Inputs) []Finding {
 			r := float64(top.Tokens) / float64(top.PrevTokens)
 			out = append(out, Finding{
 				Severity: "info", Kind: "spend_spike",
-				Title:  fmt.Sprintf("%s is %.1f× its previous period and the top contributor", shortPath(top.CWD), r),
-				Detail: fmt.Sprintf("%s vs %s", tokens(top.Tokens), tokens(top.PrevTokens)),
-				Scope:  map[string]string{"project": top.CWD},
+				Title:    fmt.Sprintf("%s is %.1f× its previous period and the top contributor", shortPath(top.CWD), r),
+				Detail:   fmt.Sprintf("%s vs %s", tokens(top.Tokens), tokens(top.PrevTokens)),
+				Template: TmplSpendSpikeProject,
+				Args: map[string]string{
+					"project": shortPath(top.CWD), "ratio": fmt.Sprintf("%.1f", r),
+					"tokens": tokens(top.Tokens), "prev": tokens(top.PrevTokens),
+				},
+				Scope: map[string]string{"project": top.CWD},
 				// Same weight as the blended finding above, not its own ratio r: a
 				// spike concentrated in one project routinely makes r exceed the
 				// blended ratio, so magnitude cannot be trusted to keep this listed
@@ -325,29 +393,46 @@ func Now(in NowInputs) []Finding {
 			window = "5-hour window"
 		}
 		fs = append(fs, Finding{Severity: sev, Kind: "window_high",
-			Title: fmt.Sprintf("%s is at %.0f%% of its %s", w.Label, w.FiveHourPct, window),
-			Link:  "#wall", weight: w.FiveHourPct})
+			Title:    fmt.Sprintf("%s is at %.0f%% of its %s", w.Label, w.FiveHourPct, window),
+			Template: TmplWindowHigh,
+			// `window` is a label off the reading when the provider states one
+			// and a default otherwise. The default is ours to translate; a
+			// provider's own wording is not, so `windowDefaulted` says which
+			// this is rather than leaving a translator to guess.
+			Args: map[string]string{
+				"label": w.Label, "pct": fmt.Sprintf("%.0f", w.FiveHourPct),
+				"window": window, "windowDefaulted": fmt.Sprint(w.Window == ""),
+			},
+			Link: "#wall", weight: w.FiveHourPct})
 	}
 	for _, e := range in.Endpoints {
 		if e.LastSeen != nil && in.Now.Sub(*e.LastSeen) <= staleAfter {
 			continue
 		}
 		title := fmt.Sprintf("%s has never reported", e.Label)
+		tmpl := TmplStaleAgentNever
+		args := map[string]string{"label": e.Label}
 		w := float64(1 << 30)
 		if e.LastSeen != nil {
 			title = fmt.Sprintf("%s last reported %s ago", e.Label, dur(in.Now.Sub(*e.LastSeen)))
+			tmpl = TmplStaleAgentLast
+			args["ago"] = dur(in.Now.Sub(*e.LastSeen))
 			w = in.Now.Sub(*e.LastSeen).Seconds()
 		}
 		fs = append(fs, Finding{Severity: "warning", Kind: "stale_agent", Title: title,
-			Detail: "Its share of every total is under-counted until it returns.", Link: "#fleet", weight: w})
+			Detail:   "Its share of every total is under-counted until it returns.",
+			Template: tmpl, Args: args, Link: "#fleet", weight: w})
 	}
 	for _, l := range in.Live {
 		if l.Tokens < liveRunawayTokens {
 			continue
 		}
 		fs = append(fs, Finding{Severity: "warning", Kind: "live_runaway",
-			Title:  fmt.Sprintf("live session %s has %s tokens in flight", short(l.SessionID), tokens(l.Tokens)),
-			Detail: shortPath(l.CWD), Scope: map[string]string{"session": l.SessionID}, Link: "#live", weight: float64(l.Tokens)})
+			Title:    fmt.Sprintf("live session %s has %s tokens in flight", short(l.SessionID), tokens(l.Tokens)),
+			Detail:   shortPath(l.CWD),
+			Template: TmplLiveRunaway,
+			Args:     map[string]string{"session": short(l.SessionID), "tokens": tokens(l.Tokens), "project": shortPath(l.CWD)},
+			Scope:    map[string]string{"session": l.SessionID}, Link: "#live", weight: float64(l.Tokens)})
 	}
 	return finish(fs)
 }

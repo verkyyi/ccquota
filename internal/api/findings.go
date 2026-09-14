@@ -39,7 +39,7 @@ func (s *Server) handleFindings(w http.ResponseWriter, r *http.Request) {
 		"since": f.Start, "until": f.End, "view": "review",
 		// findings.Review always returns a non-nil slice (finish() converts
 		// nil to []Finding{}), so this is never a JSON null.
-		"findings": findings.Review(in),
+		"findings": localizeFindings(findings.Review(in), localeOf(r)),
 	})
 }
 
@@ -166,7 +166,7 @@ func (s *Server) handleNowFindings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"account_uuid": account, "all_accounts": account == store.AllAccounts,
 		"view":     "now",
-		"findings": findings.Now(in),
+		"findings": localizeFindings(findings.Now(in), localeOf(r)),
 	})
 }
 
