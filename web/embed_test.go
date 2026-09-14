@@ -251,3 +251,21 @@ func TestDashboard_ThePageReportsOnlyRealMoney(t *testing.T) {
 		t.Error("now.js still renders the $/hour tile — that rate was notional")
 	}
 }
+
+// A card's own title must outrank the headings inside it.
+//
+// `.card > h2` styles only the direct child, so an h2 one level deeper falls
+// through to the browser default — 1.5em bold — and renders LARGER than the
+// card title above it. That inversion shipped: the Efficiency card's "Effort",
+// "Entrypoint" and "Turns: main vs. subagent" were the biggest text in a card
+// whose own title was 13px. A descendant rule has to exist for the nested case.
+func TestDashboard_NestedCardHeadingsAreStyled(t *testing.T) {
+	b, err := fs.ReadFile(Assets(), "styles.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), ".card * h2") {
+		t.Error("styles.css has no rule for headings nested inside a card; " +
+			"they will fall back to the browser default and outrank the card's own title")
+	}
+}
