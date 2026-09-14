@@ -121,6 +121,13 @@ export const zhCN = {
   'day.6': '周六',
   'fold.sentence': '最忙的一小时：{day} {hour}（本地时间）。最闲的 4 小时：{from}–{to}。',
 
+  /* ------------------------------------------------ currency conversion */
+  'fx.billedTip': '实际计费 {amount} · 按 {rate} {base}/{target} 折算（汇率截至 {asOf}）',
+  'fx.rateLine': '标了 ≈ 的金额是为显示而折算的，按 {rate} {base}/{target}，汇率截至 {asOf}。',
+  'fx.fallbackLine': '读不到实时汇率，这里用的是构建时钉死的那个（{source}）。',
+  'fx.staleLine': '这个汇率自 {asOf} 起就没动过。',
+  'fx.billedIn': '账本里每个数字都保留它被计费时的币种。',
+
   /* ------------------------------------------------------- gauges + tips */
   'gauge.critical': '危险',
   'gauge.high': '偏高',

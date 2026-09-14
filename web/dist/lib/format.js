@@ -2,7 +2,7 @@
 // fmtInt, fmtUSD, fmtFull, shortProject, relTime, ago are copied verbatim from
 // the <script> block of the original web/dist/index.html — they were already
 // pure, just inlined there.
-import { t, locale } from './i18n.js';
+import { t, locale, displayCurrency } from './i18n.js';
 
 export const fmtInt = (n) => {
   n = Number(n) || 0;
@@ -42,21 +42,95 @@ function moneyFormat(currency) {
   return f;
 }
 
-/** fmtMoney renders an amount IN THE CURRENCY IT WAS BILLED IN, formatted for
- *  the viewer's locale.
+// The one rate the page converts at, installed once at boot (app.js) from
+// /v1/fx. One value for the whole page on purpose: fetching it per card would
+// let two cards render the same figure at two rates if their requests straddled
+// a refresh, which is the sort of quietly-inconsistent money this hub exists to
+// keep out.
+//
+// Null until it arrives, and null forever on a hub that cannot reach a feed —
+// in which case every figure renders in the currency it was billed in, which is
+// always the truthful rendering.
+let fx = null;
+
+/** useFxRate installs (or clears) the display conversion rate. */
+export function useFxRate(r) {
+  fx = r && r.available && r.rate > 0 ? r : null;
+  return fx;
+}
+
+/** currentFx is the installed rate, for the surfaces that must disclose it. */
+export const currentFx = () => fx;
+
+/** convert returns [amount, currency, converted] for a figure to DISPLAY.
  *
- *  It converts nothing, and that is deliberate rather than unfinished. Go's
- *  api.RealSpendOver already refuses to add two currencies together — it reports
- *  the total as incomplete instead ("this hub does no currency conversion") —
- *  because a converted figure is money nobody was charged, at a rate nobody
- *  reviewed. The same rule has to hold on the way out: showing a Chinese reader
- *  ¥611 for an $85.75 invoice would invent both the number and the rate.
+ *  Unchanged unless a rate covering exactly this pair is loaded. The inverse is
+ *  used when it is the pair we hold — one rate answers USD→CNY and CNY→USD, and
+ *  refetching for the mirror would risk the two disagreeing. */
+function convert(amount, billed) {
+  const display = displayCurrency();
+  if (!fx || billed === display) return [amount, billed, false];
+  if (fx.base === billed && fx.target === display) return [amount * fx.rate, display, true];
+  if (fx.base === display && fx.target === billed) return [amount / fx.rate, display, true];
+  return [amount, billed, false];
+}
+
+/** APPROX marks a figure that has been through a rate. One character, always
+ *  present, the same way `≥` marks a lower bound: whatever the tooltip says,
+ *  the number on the page has to carry its own caveat. */
+export const APPROX = '≈ ';
+
+/** fmtMoney renders an amount for the viewer.
  *
- *  What DOES follow the locale is the rendering: grouping, decimal mark, and
- *  where the symbol sits. A zh-CN viewer sees "US$85.75" rather than "$85.75",
- *  which says which dollar — and a deployment that bills in CNY finally gets
- *  "¥46.00" instead of the "$46.00" this function used to print for it. */
-export const fmtMoney = (n, currency) => moneyFormat(currency || DEFAULT_CURRENCY).format(Number(n) || 0);
+ *  The LEDGER keeps every figure in the currency it was billed in — cost_usd
+ *  stays USD, a plan priced in CNY stays CNY, and api.RealSpendOver still
+ *  refuses to add two currencies rather than converting one into the other.
+ *  This is the display layer on top of that, and it does two things:
+ *
+ *    1. renders in the viewer's locale, so a zh-CN reader sees "US$85.75"
+ *       rather than an ambiguous "$85.75";
+ *    2. converts to the viewer's own currency when a rate is loaded, marked
+ *       with `≈` and with the billed amount and the rate in its tooltip.
+ *
+ *  The conversion is never arithmetic anyone depends on: totals are summed in
+ *  the billed currency and converted after, so the parts still add to the whole,
+ *  and a figure that has been converted says so. pricing.GatewayCNYPerUSD's
+ *  comment warns that a live feed "would silently restate every historical
+ *  figure each morning" — it is right, and `≈` plus moneyTitle is how this stops
+ *  being silent. */
+export function fmtMoney(n, currency) {
+  const billed = (currency || DEFAULT_CURRENCY).toUpperCase();
+  const [amount, cur, converted] = convert(Number(n) || 0, billed);
+  return (converted ? APPROX : '') + moneyFormat(cur).format(amount);
+}
+
+/** moneyTitle is the tooltip for a converted figure: what was actually billed,
+ *  and the rate it came through. Empty when nothing was converted — there is
+ *  no claim to qualify. */
+export function moneyTitle(n, currency) {
+  const billed = (currency || DEFAULT_CURRENCY).toUpperCase();
+  const [, , converted] = convert(Number(n) || 0, billed);
+  if (!converted) return '';
+  return t('fx.billedTip', {
+    amount: moneyFormat(billed).format(Number(n) || 0),
+    rate: fx.rate.toFixed(4), base: fx.base, target: fx.target,
+    asOf: fxAsOf(),
+  });
+}
+
+/** fxAsOf is when the FEED last moved, not when this page fetched it: a feed
+ *  that has stopped updating must read as stale even though the last request
+ *  succeeded a second ago. */
+export function fxAsOf() {
+  if (!fx) return '';
+  if (!fx.as_of) return t('common.unknownTime');
+  const d = new Date(fx.as_of);
+  // locale(), not the browser default: the rest of the sentence around this
+  // date is in the viewer's language, and "9/13/2026" in the middle of a
+  // Chinese one is the same half-translated seam the dictionaries exist to
+  // close.
+  return Number.isFinite(d.getTime()) ? d.toLocaleDateString(locale()) : t('common.unknownTime');
+}
 
 /** fmtUSD is fmtMoney for the `cost_usd` column, which is USD by construction:
  *  every rate table resolves to USD at ingest (the gateway's own CNY rates are

@@ -120,6 +120,13 @@ export const en = {
   'day.6': 'Sat',
   'fold.sentence': 'busiest hour: {day} {hour} local. Quietest 4-hour window: {from}–{to}.',
 
+  /* ------------------------------------------------ currency conversion */
+  'fx.billedTip': 'Billed {amount} · converted at {rate} {base}/{target} (rate as of {asOf})',
+  'fx.rateLine': 'Amounts marked ≈ are converted for display at {rate} {base}/{target}, rate as of {asOf}.',
+  'fx.fallbackLine': 'The live rate could not be read, so this uses one pinned in the build ({source}).',
+  'fx.staleLine': 'This rate has not moved since {asOf}.',
+  'fx.billedIn': 'The ledger keeps every figure in the currency it was billed in.',
+
   /* ------------------------------------------------------- gauges + tips */
   'gauge.critical': 'critical',
   'gauge.high': 'high',

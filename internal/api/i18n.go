@@ -167,3 +167,16 @@ func localizedReasons(rows []store.UnpricedReason, locale string) []store.Unpric
 	}
 	return out
 }
+
+// fxNote is what every converted figure has to say for itself.
+//
+// It is the counterpart of pricing.GatewayPriceNote: that one says a gateway
+// figure IS the charge, this one says a converted figure is NOT. Both exist
+// because the number alone cannot tell a reader which it is looking at.
+var fxNote = i18n.Text{
+	i18n.EN: "Converted for display only. The ledger keeps every figure in the currency it was " +
+		"billed in, and no total is computed through this rate — a converted amount is an " +
+		"approximation of an invoice, never the invoice.",
+	i18n.ZhCN: "仅为显示而折算。账本里每个数字都保留它被计费时的币种，" +
+		"也没有任何合计是经由这个汇率算出来的 —— 折算出来的金额是对账单的近似，永远不是账单本身。",
+}

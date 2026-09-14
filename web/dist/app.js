@@ -10,7 +10,8 @@ import { apiQuery } from './lib/state.js';
 import { extent, resolve } from './lib/brush.js';
 import { renderDetail, closeDetail } from './session.js';
 import { $, el, localizeShell } from './lib/dom.js';
-import { t, withLocale } from './lib/i18n.js';
+import { t, withLocale, displayCurrency } from './lib/i18n.js';
+import { useFxRate } from './lib/format.js';
 
 export const app = {
   state: parse(location.hash),
@@ -141,6 +142,17 @@ async function boot() {
   // the page's furniture in one language while the cards arrive in another.
   localizeShell(t);
   wireOpsFold();
+  // The display rate, BEFORE the first render.
+  //
+  // One fetch for the whole page, and it must land before any card draws: a
+  // card that rendered at no rate and a card that rendered at one would show
+  // the same money two ways on one screen. Failure is not an error state —
+  // a hub with no route to an FX feed shows every figure in the currency it
+  // was billed in, which is the truthful rendering anyway.
+  try {
+    const display = displayCurrency();
+    useFxRate(display === 'USD' ? null : await app.api(`/v1/fx?base=USD&target=${encodeURIComponent(display)}`));
+  } catch { useFxRate(null); }
   try { app.accounts = await app.api('/v1/accounts'); }
   catch (err) { $('#banners').replaceChildren(el('div', { class: 'banner err' }, t('app.unreachable', { error: err.message }))); return; }
   addEventListener('hashchange', route);

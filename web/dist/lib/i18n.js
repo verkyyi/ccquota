@@ -86,6 +86,16 @@ if (typeof document !== 'undefined') {
 
 export const locale = () => current;
 
+/** LOCALE_CURRENCY is the currency a viewer of each locale reads money in.
+ *
+ *  A reader's language is a decent proxy for the currency they think in, and it
+ *  is the only signal this page has. It decides DISPLAY only — what was
+ *  actually billed is a property of the charge, not of who is looking at it. */
+export const LOCALE_CURRENCY = { en: 'USD', 'zh-CN': 'CNY' };
+
+/** displayCurrency is the currency this viewer's figures are rendered in. */
+export const displayCurrency = () => LOCALE_CURRENCY[current] || 'USD';
+
 /** useLocale sets the in-memory locale without persisting or reloading. For
  *  tests, and for anything that needs to render one string in a locale that is
  *  not the viewer's. */
