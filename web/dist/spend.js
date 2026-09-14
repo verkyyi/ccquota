@@ -7,9 +7,10 @@
 // of the metered sources reports through. Putting it on the top axis beside
 // two products is what made the old page read as "Claude, plus some others".
 import { el } from './lib/dom.js';
-import { fmtUSD } from './lib/format.js';
+import { fmtMoney } from './lib/format.js';
 import { unpricedEvents } from './lib/cost.js';
 import { spendTerms } from './lib/spend.js';
+import { t } from './lib/i18n.js';
 
 export { spendTerms };
 
@@ -18,13 +19,13 @@ export function renderSpend(root, summary) {
   const rs = summary.real_spend;
   const terms = spendTerms(rs);
   const card = el('div', { class: 'card', id: 'real-spend' },
-    el('h2', {}, 'What this actually cost'));
+    el('h2', {}, t('spend.title')));
 
   card.appendChild(el('p', { class: 'figure' },
-    rs ? fmtUSD(rs.total) + (rs.complete ? '' : ' ≥') : '—'));
+    rs ? fmtMoney(rs.total, rs.currency) + (rs.complete ? '' : ' ≥') : '—'));
   if (terms.length) {
     card.appendChild(el('p', { class: 'terms' },
-      terms.map((t) => `${t.label} ${fmtUSD(t.amount)}`).join('  +  ')));
+      terms.map((term) => `${term.label} ${fmtMoney(term.amount, term.currency)}`).join('  +  ')));
   }
 
   // The API-equivalent figure is deliberately NOT here, and not anywhere else
@@ -45,12 +46,11 @@ export function renderSpend(root, summary) {
   if (summary.real_spend_note) card.appendChild(el('p', { class: 'hint' }, summary.real_spend_note));
   if (rs && !rs.complete) {
     card.appendChild(el('p', { class: 'hint warn' },
-      'Incomplete — ' + (rs.missing || []).join('; ')));
+      t('spend.incomplete', { missing: (rs.missing || []).join('; ') })));
   }
   const unpriced = unpricedEvents(summary);
   if (unpriced) {
-    card.appendChild(el('p', { class: 'hint' },
-      `${unpriced} request(s) have no price data, so every figure here is a lower bound.`));
+    card.appendChild(el('p', { class: 'hint' }, t('spend.unpriced', { n: unpriced })));
   }
   root.replaceChildren(card);
 }

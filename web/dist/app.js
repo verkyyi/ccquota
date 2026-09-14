@@ -9,14 +9,19 @@ import { renderConsumption } from './consumption.js';
 import { apiQuery } from './lib/state.js';
 import { extent, resolve } from './lib/brush.js';
 import { renderDetail, closeDetail } from './session.js';
-import { $, el } from './lib/dom.js';
+import { $, el, localizeShell } from './lib/dom.js';
+import { t, withLocale } from './lib/i18n.js';
 
 export const app = {
   state: parse(location.hash),
   accounts: [],
   now: () => Date.now(),
   async api(path, signal) {
-    const res = await fetch(path, { headers: { Accept: 'application/json' }, signal });
+    // Every request carries the locale, in ONE place: the server's own notes
+    // (real spend, price basis per source, the empty-provider explanation) come
+    // back translated, and a caller that forgot to tag its path would print one
+    // English paragraph in the middle of a Chinese card.
+    const res = await fetch(withLocale(path), { headers: { Accept: 'application/json' }, signal });
     if (!res.ok) {
       let msg = `HTTP ${res.status}`;
       try { msg = (await res.json()).error || msg; } catch {}
@@ -132,9 +137,12 @@ function wireOpsFold() {
 }
 
 async function boot() {
+  // The shell's own strings first, before any fetch: a slow hub must not leave
+  // the page's furniture in one language while the cards arrive in another.
+  localizeShell(t);
   wireOpsFold();
   try { app.accounts = await app.api('/v1/accounts'); }
-  catch (err) { $('#banners').replaceChildren(el('div', { class: 'banner err' }, 'Cannot reach the hub: ' + err.message)); return; }
+  catch (err) { $('#banners').replaceChildren(el('div', { class: 'banner err' }, t('app.unreachable', { error: err.message }))); return; }
   addEventListener('hashchange', route);
   route();
   // The stored cards refresh every minute; the analysis section only when the
