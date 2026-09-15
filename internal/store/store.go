@@ -357,7 +357,7 @@ func (s *Store) EndpointByTokenHash(hash string) (*Endpoint, error) {
 // and making it conditional would mean reading the row first on a path whose
 // whole job is to be a sink.
 func (s *Store) MarkRepoShipper(endpointID string) error {
-	_, err := s.db.Exec(`UPDATE endpoints SET kind = 'repo_shipper' WHERE endpoint_id = ?`, endpointID)
+	_, err := s.write.Exec(`UPDATE endpoints SET kind = 'repo_shipper' WHERE endpoint_id = ?`, endpointID)
 	if err != nil {
 		return fmt.Errorf("mark repo shipper: %w", err)
 	}
