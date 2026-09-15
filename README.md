@@ -1,5 +1,10 @@
 # TokenLedger
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/badge-dark.svg">
+  <img alt="tokens counted by this hub" src="docs/img/badge-light.svg">
+</picture>
+
 **Books for a team account pool.** A small team buys N Claude subscriptions
 centrally and schedules its work against whichever of them still has headroom.
 That is markedly cheaper per unit of quota than buying a seat per person — and
@@ -15,6 +20,17 @@ One Go binary: an agent on every endpoint, a hub with a dashboard and an API,
 and a read-only MCP server so any Claude session can ask. Usage covers **Codex**
 alongside Claude Code, with a source dimension for comparing or filtering them;
 both support subscription-limit monitoring when a usable local login is present.
+
+![what it cost, and every model that ran](docs/img/dashboard.png)
+
+<sub>The headline is the sum of two <em>different kinds of money</em> — a
+subscription that bills monthly, and metered spend that bills per call — and the
+consumption table below it is keyed on (provider, model), because one gateway
+failing over between vendors reaches the same model id on two contracts.
+Screenshots on this page come from a throwaway hub with invented data —
+<code>docs/img/seed-demo.sh</code> stands that hub up again so the pictures can be
+re-shot when the UI moves. Endpoint ids and dates differ every run, so it
+reproduces the <em>state</em>, not the bytes.</sub>
 
 ```
 ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
@@ -407,6 +423,11 @@ One page, no tabs. It reads top to bottom: what this actually cost, what is
 running right now, every model that ran and what it cost, then the analysis
 and the fleet.
 
+![the usage half: timeline and selection totals](docs/img/usage.png)
+
+<sub>Drag the timeline selection and every card below it re-reports on that
+span. Each tile is compared with the equal-length period right before it.</sub>
+
 The top-level axis is the **billing relationship**, not the product name.
 There are two ways a deployment is charged — a subscription that bills monthly
 whether or not a token is spent, and metered spend that bills per call — and
@@ -632,6 +653,8 @@ ccquota team --endpoint <endpoint-id> --set platform
 ccquota team --endpoint <endpoint-id> --set ""     # un-assign
 ```
 
+![ccquota team --list and ccquota plan --list](docs/img/cli.svg)
+
 Teams are assigned **here, on the hub**, and are never reported by an endpoint:
 a machine that could name its own team could move its spend onto another team's
 budget. Team is resolved when a query runs rather than stamped on each turn, so
@@ -661,7 +684,7 @@ transcript attests to what a plan costs, so an operator has to say:
 
 ```bash
 ccquota plan --set max --monthly 200                    # from now on
-ccquota plan --set max --monthly 250 --from 2026-10-01  # a price change
+ccquota plan --set max --monthly 250 --from 2026-10-01T00:00:00Z   # a price change
 ccquota plan --list                                     # every price, current and superseded
 ccquota plan --spend --days 30                          # real, billed spend
 ```
@@ -750,15 +773,118 @@ Point any MCP client at `https://your-hub/mcp` with the viewer token as a bearer
 }}}
 ```
 
-Twenty-one read-only tools: `list_accounts`, `get_limits`, `list_endpoints`, `usage_by_source`,
+Twenty-four read-only tools: `list_accounts`, `get_limits`, `list_endpoints`, `usage_by_source`,
 `usage_by_provider`, `usage_by_account`, `list_account_switches`, `list_endpoint_accounts`,
 `usage_by_endpoint`, `usage_by_user`, `usage_by_project`, `usage_by_session`,
 `usage_history`, `usage_summary`, `list_sessions`, `get_session`,
-`get_findings`, `get_collectors`, `get_account_usage`, `get_live`, `quota_history`.
+`get_findings`, `get_collectors`, `get_account_usage`, `get_live`, `quota_history`,
+`list_repos`, `repo_progress`, `list_repo_issues`.
+
+The last three read repo progress rather than spend. They exist because agents
+read backlogs and humans read dashboards: one source, two renderers. A second
+agent-facing copy of the same rows would drift from this one within a week.
 
 Read-only is deliberate. A monitor that could also pause endpoints or change
 quotas needs a control channel back to every machine — a far larger security
 surface than "tell me what my fleet spent".
+
+## Repo progress — what the tokens bought
+
+The sections above answer *how much* a subscription spent and *where* it went.
+They cannot answer what that spend produced. A hub can also hold repository
+progress — issues opened and closed, how long they live, what is stalled — and
+hold it **under the same key**:
+
+- the hub already keys spend by account / machine / session
+- a fleet-style orchestrator binds a session to an issue
+- a commit convention binds a commit to an issue
+
+`issue` is the axis that joins all three. That is why this is not a second
+dashboard beside the ledger: two dashboards sharing a binary gain nothing, and
+the same key is what makes cost-per-issue and cost-per-merged-PR answerable at
+all.
+
+**The collector is deliberately not in this binary.** Which repositories, which
+credentials, how often, behind which firewall — every one of those is a
+per-team decision, and folding them in here would couple hub releases to
+collection logic. The hub is a sink. A shipper POSTs snapshots into it, the way
+endpoint agents already do.
+
+### Shipping a snapshot
+
+Mint a token for the shipper the same way you enroll a machine, then POST:
+
+```bash
+curl -s https://your-hub/v1/ingest/repo \
+  -H "Authorization: Bearer $SHIPPER_TOKEN" \
+  -H 'Content-Type: application/json' -d @- <<'JSON'
+{
+  "repo": "owner/name",
+  "observed_at": "2026-09-14T03:00:00Z",
+  "issues": [
+    {"number": 32, "state": "open", "created_at": "2026-09-01T10:00:00Z",
+     "title": "hub: ingest repo-progress facts", "labels": ["enhancement"],
+     "comments": 3, "url": "https://github.com/owner/name/issues/32",
+     "shipped_at": "2026-09-12T08:00:00Z", "shipped_ref": "e10e39c"}
+  ],
+  "days": [
+    {"day": "2026-09-13", "opened": 4, "closed": 6, "open_at_end": 431,
+     "merged_prs": 5, "close_p50_seconds": 11232, "close_p90_seconds": 397440,
+     "close_p95_seconds": 941760, "closed_sample": 2257}
+  ]
+}
+JSON
+```
+
+It is an enrollment token, not the viewer token — one credential per shipper,
+revocable on its own. Unlike `/v1/ingest` it carries no identity: a repo shipper
+is a cron job with a GitHub token, not a machine running an agent, and making it
+invent an `account_uuid` to be let in would stamp a fabricated attribution on
+every row it writes. **Repo rows carry no account at all**, deliberately: one
+repository is worked by endpoints on several plans at once, so naming one of
+them would be a guess presented as a fact.
+
+Everything is upserted on `(repo, number)` and `(repo, day)`, so a retry is a
+no-op and a large backlog can be paged across several POSTs under one
+`observed_at`. An older snapshot never overwrites a newer one — after a retry
+they can arrive out of order, and a stale row would silently reopen a closed
+issue.
+
+### Two lifetimes, on purpose
+
+- **Daily rows are kept forever.** They are one row per repo per day, and they
+  are the only record of what the backlog looked like *last Tuesday* — a
+  question GitHub itself cannot answer retroactively, because its API exposes
+  only each issue's current state. This is also why the hub stores rows and
+  never rendered output: stored HTML makes history impossible.
+- **Per-issue rows are bounded** by the same `--retention-days` window the raw
+  event ledger uses. A closed issue ages out once the daily rows have absorbed
+  it, and an open issue no shipper has reported for a whole window ages out too
+  — it was deleted, transferred or made private upstream, and a phantom at the
+  top of a stalled list is where a wrong row does the most damage.
+
+One binary and one SQLite file on a single replica is a property worth
+defending. A reporting feature must not turn storage into an operational
+problem for what was previously just a token ledger.
+
+### Thresholds come from the repository, never from this README
+
+Nothing here says "stale after 30 days", and nothing in the code does either.
+The close-time percentiles a shipper sends are the scale every age is judged
+against, and they differ by orders of magnitude between repositories. Measured
+on one real repo — 2,688 issues in 82 days — the median issue closed in 0.13
+days, p90 was 4.6 and p95 10.9, with 149 of 431 open issues past p95. A
+threshold that fits that repository fits no other.
+
+So when no percentiles have been shipped, the hub does not substitute one:
+`/v1/repo/issues?stale=1` answers `409`, the MCP tool errors, and the dashboard
+card says the scale is unknown. A confident "12 stale issues" computed from a
+number nobody measured is worse than no answer, because a reader cannot tell it
+from a measured one.
+
+Read it back over `/v1/repos`, `/v1/repo/flow`, `/v1/repo/issues` — the
+dashboard's Progress band and the three MCP tools are two renderers over those
+same rows, never two copies of them.
 
 ## How it works, and what that costs you
 
