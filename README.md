@@ -886,6 +886,33 @@ Read it back over `/v1/repos`, `/v1/repo/flow`, `/v1/repo/issues` — the
 dashboard's Progress band and the three MCP tools are two renderers over those
 same rows, never two copies of them.
 
+### The other half of progress: what is waiting on a person
+
+A backlog can be moving fast and still be blocked, if what it is blocked on is
+somebody doing something by hand. So a shipper may also send `human_steps` and
+`human_days` in the same snapshot: the pre-release steps a release batch is
+waiting on, and the daily share of release batches that needed one at all.
+Read them back over `/v1/repo/human-debt?repo=owner/name`.
+
+Three shapes this deliberately refuses:
+
+- **It does not filter by the signed-in viewer.** This hub's WeCom ticket
+  carries one fixed subject per (app, tenant), so two colleagues' sessions are
+  byte-identical here. The card groups by owner and says "everyone's" in its
+  first line. A "mine" filter would be a coin flip rendered as a personal
+  claim, on the one surface whose whole job is saying who owes what.
+- **It is a view, never a control.** Finishing a step happens wherever the
+  person was told about it. A "done" button here would be a second writer and
+  therefore a second truth.
+- **It stores no thresholds.** There is no "overdue" column and no escalation
+  ladder: how long a step has waited is computed on read, and who gets told at
+  three days is the business of whatever does the telling.
+
+`done` and `done_at` are two fields on purpose. A step is finished by striking
+it out where it is written, and a person can do that by hand — in which case it
+is done and no clock recorded when. Requiring a time would force a shipper to
+choose between inventing one and reporting a finished step as still owed.
+
 ## How it works, and what that costs you
 
 **Two numbers, kept apart.** The agent reads
